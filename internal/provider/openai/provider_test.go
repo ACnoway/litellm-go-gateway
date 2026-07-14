@@ -7,10 +7,12 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/example/litellm-go-gateway/internal/biz"
+	"github.com/acnoway/litellm-go-gateway/internal/biz"
 )
 
 func TestProviderChatSendsOpenAIRequest(t *testing.T) {
+	// 用本地 httptest 服务器替代真实上游，验证 adapter 的协议转换，
+	// 同时保证测试不会消耗 API 配额或依赖外网。
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/v1/chat/completions" {
 			t.Fatalf("path = %q", request.URL.Path)
@@ -44,6 +46,8 @@ func TestProviderChatSendsOpenAIRequest(t *testing.T) {
 }
 
 func TestProviderMapsOpenAIError(t *testing.T) {
+	// 429 是调用方通常需要区分处理的上游错误。测试确保状态码和错误码
+	// 不会在 adapter 层丢失，Handler 才能将它映射回兼容的 HTTP 错误响应。
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.WriteHeader(http.StatusTooManyRequests)
 		_, _ = writer.Write([]byte(`{"error":{"message":"rate limit","code":"rate_limit_exceeded"}}`))
