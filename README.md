@@ -13,13 +13,14 @@ A Go AI Gateway scaffold inspired by LiteLLM's proxy architecture. It currently 
 
 ## Run
 
-Set environment variables from `.env.example`, then run:
+Copy `.env.example` to `.env` in the project root and set the required values. The application loads this file at startup; existing process environment variables take precedence.
 
 ```powershell README.md
-$env:OPENAI_API_KEY = "..."
-$env:GATEWAY_API_KEY = "local-gateway-key"
+Copy-Item .env.example .env
+# Edit .env and set OPENAI_API_KEY (and optionally GATEWAY_API_KEY).
 go run ./cmd/gateway
 ```
+
 
 The gateway listens on `http://localhost:8080` by default.
 

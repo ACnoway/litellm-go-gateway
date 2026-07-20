@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // Config 汇集进程启动时需要的配置。当前配置只覆盖最小 OpenAI Gateway；
@@ -23,8 +25,12 @@ type OpenAIConfig struct {
 	Timeout time.Duration
 }
 
-// Load 从环境变量建立配置，并为本地开发提供安全的非敏感默认值。
+// Load 从当前工作目录的 .env 和进程环境变量建立配置，并为本地开发提供安全的非敏感默认值。
+// .env 不存在或无法解析时仍会启动，以便容器和部署平台只使用进程环境变量。
+// 已存在的进程环境变量不会被 .env 覆盖。
 func Load() Config {
+	_ = godotenv.Load()
+
 	return Config{
 		Address:       valueOrDefault("GATEWAY_ADDRESS", ":8080"),
 		GatewayAPIKey: os.Getenv("GATEWAY_API_KEY"),
