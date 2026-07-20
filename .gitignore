@@ -1,0 +1,28 @@
+# Local environment configuration
+.env
+.env.*
+!.env.example
+
+# Go build outputs
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Test and coverage output
+*.out
+coverage.out
+coverage.txt
+
+# IDE settings
+.vscode/
+.idea/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
