@@ -6,6 +6,7 @@ import (
 
 	"github.com/acnoway/litellm-go-gateway/internal/app"
 	"github.com/acnoway/litellm-go-gateway/internal/config"
+	"github.com/acnoway/litellm-go-gateway/internal/pkg/logger"
 	"github.com/acnoway/litellm-go-gateway/internal/provider"
 	_ "github.com/acnoway/litellm-go-gateway/internal/provider/anthropic"
 	_ "github.com/acnoway/litellm-go-gateway/internal/provider/azure"
@@ -18,6 +19,13 @@ import (
 // main 只负责依赖装配。新增 provider 时无需修改此文件，
 // 只需在 internal/provider/<name>/ 中实现并注册。
 func main() {
+	// 初始化结构化日志器，从环境变量读取日志格式（默认 json）
+	logFormat := os.Getenv("LOG_FORMAT")
+	if logFormat == "" {
+		logFormat = "json"
+	}
+	logger.Init(logFormat)
+
 	settings := config.Load()
 	if !settings.Valid() {
 		slog.Error("invalid configuration")
@@ -36,6 +44,11 @@ func main() {
 
 	server := app.NewHTTPServer(settings.Address, router)
 	application := app.New(server, log.NewStdLogger(os.Stdout))
+
+	slog.Info("starting gateway",
+		"address", settings.Address,
+		"log_format", logFormat,
+	)
 
 	if err := application.Run(); err != nil {
 		slog.Error("gateway stopped", "error", err)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/acnoway/litellm-go-gateway/internal/biz"
 	"github.com/acnoway/litellm-go-gateway/internal/config"
+	"github.com/acnoway/litellm-go-gateway/internal/pkg/logger"
 )
 
 // ChatService 是聊天用例的编排层。目前它只把调用委托给单个 provider；
@@ -29,26 +30,72 @@ func NewChatService(provider biz.Provider, retryConfig config.RetryConfig) *Chat
 
 // Complete 执行非流式聊天调用。ctx 来自 HTTP 请求，客户端取消时会传递到上游请求。
 func (s *ChatService) Complete(ctx context.Context, request biz.ChatRequest) (biz.ChatResponse, error) {
-	return s.withRetry(ctx, func() (biz.ChatResponse, error) {
+	log := logger.FromContext(ctx)
+	log.Info("starting chat completion",
+		"model", request.Model,
+		"stream", false,
+		"provider", s.provider.Name(),
+	)
+
+	resp, err := s.withRetry(ctx, func() (biz.ChatResponse, error) {
 		return s.provider.Chat(ctx, request)
 	})
+
+	if err != nil {
+		log.Error("chat completion failed",
+			"error", err,
+			"provider", s.provider.Name(),
+		)
+		return biz.ChatResponse{}, err
+	}
+
+	log.Info("chat completion succeeded",
+		"provider", s.provider.Name(),
+	)
+	return resp, nil
 }
 
 // CompleteStream 执行流式聊天调用，并把仍打开的上游流交给 Handler 转发。
 // 流式请求不重试，因为响应体已经开始传输，中途重试会导致客户端收到重复或错误的数据。
 func (s *ChatService) CompleteStream(ctx context.Context, request biz.ChatRequest) (biz.ChatStream, error) {
-	return s.provider.ChatStream(ctx, request)
+	log := logger.FromContext(ctx)
+	log.Info("starting chat stream",
+		"model", request.Model,
+		"stream", true,
+		"provider", s.provider.Name(),
+	)
+
+	stream, err := s.provider.ChatStream(ctx, request)
+	if err != nil {
+		log.Error("chat stream failed",
+			"error", err,
+			"provider", s.provider.Name(),
+		)
+		return biz.ChatStream{}, err
+	}
+
+	log.Info("chat stream started",
+		"provider", s.provider.Name(),
+	)
+	return stream, nil
 }
 
 // withRetry 实现指数退避重试逻辑。只对网络错误（连接失败、超时、DNS 解析失败）重试，
 // 对于 4xx 客户端错误或 5xx 服务端错误不重试，因为立即重试不太可能成功。
 func (s *ChatService) withRetry(ctx context.Context, fn func() (biz.ChatResponse, error)) (biz.ChatResponse, error) {
+	log := logger.FromContext(ctx)
 	var lastErr error
 	delay := s.retryConfig.InitialDelay
 
 	for attempt := 1; attempt <= s.retryConfig.MaxAttempts; attempt++ {
 		resp, err := fn()
 		if err == nil {
+			if attempt > 1 {
+				log.Info("retry succeeded",
+					"attempt", attempt,
+					"total_attempts", s.retryConfig.MaxAttempts,
+				)
+			}
 			return resp, nil
 		}
 
@@ -68,8 +115,19 @@ func (s *ChatService) withRetry(ctx context.Context, fn func() (biz.ChatResponse
 
 		// 最后一次尝试失败后不再等待
 		if attempt == s.retryConfig.MaxAttempts {
+			log.Error("all retry attempts exhausted",
+				"attempt", attempt,
+				"error", err,
+			)
 			break
 		}
+
+		log.Warn("retryable error occurred, will retry",
+			"attempt", attempt,
+			"max_attempts", s.retryConfig.MaxAttempts,
+			"error", err,
+			"next_delay_ms", delay.Milliseconds(),
+		)
 
 		// 检查 context 是否已取消
 		select {
