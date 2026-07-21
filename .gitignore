@@ -21,6 +21,7 @@ coverage.txt
 # IDE settings
 .vscode/
 .idea/
+.continue/
 
 # Operating system files
 .DS_Store
