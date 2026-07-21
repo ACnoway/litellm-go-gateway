@@ -21,6 +21,9 @@ coverage.txt
 # IDE settings
 .vscode/
 .idea/
+
+# Agent settings
+.claude/
 .continue/
 
 # Operating system files
