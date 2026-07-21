@@ -15,6 +15,8 @@ type Config struct {
 	Address       string
 	GatewayAPIKey string
 	OpenAI        OpenAIConfig
+	Anthropic     AnthropicConfig
+	Azure         AzureConfig
 }
 
 // OpenAIConfig 保存连接 OpenAI HTTP API 所需的信息。
@@ -23,6 +25,19 @@ type OpenAIConfig struct {
 	APIKey  string
 	BaseURL string
 	Timeout time.Duration
+}
+
+type AnthropicConfig struct {
+	APIKey  string
+	BaseURL string
+	Timeout time.Duration
+}
+
+type AzureConfig struct {
+	APIKey     string
+	BaseURL    string
+	Deployment string
+	Timeout    time.Duration
 }
 
 // Load 从当前工作目录的 .env 和进程环境变量建立配置，并为本地开发提供安全的非敏感默认值。
@@ -39,14 +54,39 @@ func Load() Config {
 			BaseURL: strings.TrimRight(valueOrDefault("OPENAI_BASE_URL", "https://api.openai.com/v1"), "/"),
 			Timeout: durationOrDefault("OPENAI_TIMEOUT", 60*time.Second),
 		},
+		Anthropic: AnthropicConfig{
+			APIKey:  os.Getenv("ANTHROPIC_API_KEY"),
+			BaseURL: strings.TrimRight(valueOrDefault("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"), "/"),
+			Timeout: durationOrDefault("ANTHROPIC_TIMEOUT", 60*time.Second),
+		},
+		Azure: AzureConfig{
+			APIKey:     os.Getenv("AZURE_API_KEY"),
+			BaseURL:    strings.TrimRight(os.Getenv("AZURE_BASE_URL"), "/"),
+			Deployment: os.Getenv("AZURE_DEPLOYMENT"),
+			Timeout:    durationOrDefault("AZURE_TIMEOUT", 60*time.Second),
+		},
 	}
 }
 
 // Valid 在监听端口前检查会导致请求构造失败的配置。
 // 这里只校验 URL 格式，不访问上游网络，也不验证 API Key 的有效性。
 func (c Config) Valid() bool {
-	_, err := url.ParseRequestURI(c.OpenAI.BaseURL)
-	return err == nil
+	if c.OpenAI.BaseURL != "" {
+		if _, err := url.ParseRequestURI(c.OpenAI.BaseURL); err != nil {
+			return false
+		}
+	}
+	if c.Anthropic.BaseURL != "" {
+		if _, err := url.ParseRequestURI(c.Anthropic.BaseURL); err != nil {
+			return false
+		}
+	}
+	if c.Azure.BaseURL != "" {
+		if _, err := url.ParseRequestURI(c.Azure.BaseURL); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // valueOrDefault 统一处理可选字符串配置的默认值逻辑。

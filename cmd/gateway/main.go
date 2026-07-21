@@ -7,6 +7,8 @@ import (
 	"github.com/acnoway/litellm-go-gateway/internal/app"
 	"github.com/acnoway/litellm-go-gateway/internal/config"
 	"github.com/acnoway/litellm-go-gateway/internal/provider"
+	_ "github.com/acnoway/litellm-go-gateway/internal/provider/anthropic"
+	_ "github.com/acnoway/litellm-go-gateway/internal/provider/azure"
 	_ "github.com/acnoway/litellm-go-gateway/internal/provider/openai"
 	"github.com/acnoway/litellm-go-gateway/internal/service"
 	"github.com/acnoway/litellm-go-gateway/internal/transport/httpapi"
