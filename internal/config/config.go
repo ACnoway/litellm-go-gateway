@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
@@ -14,9 +15,16 @@ import (
 type Config struct {
 	Address       string
 	GatewayAPIKey string
+	Retry         RetryConfig
 	OpenAI        OpenAIConfig
 	Anthropic     AnthropicConfig
 	Azure         AzureConfig
+}
+
+type RetryConfig struct {
+	MaxAttempts int
+	InitialDelay time.Duration
+	MaxDelay     time.Duration
 }
 
 // OpenAIConfig 保存连接 OpenAI HTTP API 所需的信息。
@@ -49,6 +57,11 @@ func Load() Config {
 	return Config{
 		Address:       valueOrDefault("GATEWAY_ADDRESS", ":8080"),
 		GatewayAPIKey: os.Getenv("GATEWAY_API_KEY"),
+		Retry: RetryConfig{
+			MaxAttempts:  intOrDefault("RETRY_MAX_ATTEMPTS", 3),
+			InitialDelay: durationOrDefault("RETRY_INITIAL_DELAY", 100*time.Millisecond),
+			MaxDelay:     durationOrDefault("RETRY_MAX_DELAY", 5*time.Second),
+		},
 		OpenAI: OpenAIConfig{
 			APIKey:  os.Getenv("OPENAI_API_KEY"),
 			BaseURL: strings.TrimRight(valueOrDefault("OPENAI_BASE_URL", "https://api.openai.com/v1"), "/"),
@@ -106,6 +119,19 @@ func durationOrDefault(name string, fallback time.Duration) time.Duration {
 	}
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+// intOrDefault 解析整数配置。格式不正确时回退到默认值。
+func intOrDefault(name string, fallback int) int {
+	value := os.Getenv(name)
+	if value == "" {
+		return fallback
+	}
+	parsed := 0
+	if _, err := fmt.Sscanf(value, "%d", &parsed); err != nil {
 		return fallback
 	}
 	return parsed

@@ -30,7 +30,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	chatService := service.NewChatService(providerManager)
+	chatService := service.NewChatService(providerManager, settings.Retry)
 	handler := httpapi.NewHandler(chatService)
 	router := httpapi.NewRouter(handler, settings.GatewayAPIKey)
 
