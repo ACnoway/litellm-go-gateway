@@ -17,7 +17,8 @@ cmd/gateway/main.go          wiring only — no logic here
 internal/biz/chat.go         domain types + Provider interface
 internal/config/config.go    env loading
 internal/provider/openai/    OpenAI adapter (implements biz.Provider)
-internal/provider/registry.go  name → provider lookup
+internal/provider/manager.go provider auto-discovery and routing
+internal/provider/registry.go name → provider lookup
 internal/service/chat.go     orchestration (retries, routing go here)
 internal/transport/httpapi/  Gin router + handlers + middleware
 internal/app/app.go          Kratos Server wrapper
@@ -28,12 +29,30 @@ internal/app/app.go          Kratos Server wrapper
 1. Create `internal/provider/<name>/provider.go` implementing `biz.Provider`:
    ```go
    type Provider struct { ... }
-   func (p *Provider) Chat(ctx context.Context, req biz.ChatRequest) (*biz.ChatResponse, error)
-   func (p *Provider) ChatStream(ctx context.Context, req biz.ChatRequest) (*biz.ChatStream, error)
+   func (p *Provider) Name() string { return "<name>" }
+   func (p *Provider) Chat(ctx context.Context, req biz.ChatRequest) (biz.ChatResponse, error)
+   func (p *Provider) ChatStream(ctx context.Context, req biz.ChatRequest) (biz.ChatStream, error)
    ```
-2. Register in `internal/provider/registry.go`.
-3. Wire in `cmd/gateway/main.go` based on config.
-4. Add `httptest`-based tests (see `internal/provider/openai/provider_test.go` as the pattern).
+2. Create `internal/provider/<name>/register.go` with auto-registration:
+   ```go
+   func init() {
+       provider.Register(func(cfg config.Config) biz.Provider {
+           if cfg.<Name>.APIKey == "" {
+               return nil  // skip if not configured
+           }
+           client := &http.Client{Timeout: cfg.<Name>.Timeout}
+           return New(cfg.<Name>.APIKey, cfg.<Name>.BaseURL, client)
+       })
+   }
+   ```
+3. Add config fields to `internal/config/config.go` if the provider needs custom settings.
+4. Import the provider package with `_` in `cmd/gateway/main.go` to trigger registration:
+   ```go
+   import _ "github.com/acnoway/litellm-go-gateway/internal/provider/<name>"
+   ```
+5. Add `httptest`-based tests (see `internal/provider/openai/provider_test.go` as the pattern).
+
+**Note**: The provider will be automatically discovered and wired — no changes needed in service or handler layers.
 
 ## Error Handling Convention
 
