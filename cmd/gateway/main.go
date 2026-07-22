@@ -3,9 +3,11 @@ package main
 import (
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/acnoway/litellm-go-gateway/internal/app"
 	"github.com/acnoway/litellm-go-gateway/internal/config"
+	"github.com/acnoway/litellm-go-gateway/internal/data"
 	"github.com/acnoway/litellm-go-gateway/internal/pkg/logger"
 	"github.com/acnoway/litellm-go-gateway/internal/provider"
 	_ "github.com/acnoway/litellm-go-gateway/internal/provider/anthropic"
@@ -32,13 +34,30 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 确保数据库目录存在
+	dbDir := filepath.Dir(settings.Database.Path)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		slog.Error("failed to create database directory", "error", err)
+		os.Exit(1)
+	}
+
+	// 初始化数据库
+	db, err := data.InitDB(settings.Database.Path)
+	if err != nil {
+		slog.Error("database initialization failed", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	usageRepo := data.NewUsageRepo(db)
+
 	providerManager, err := provider.NewManager(settings)
 	if err != nil {
 		slog.Error("provider setup failed", "error", err)
 		os.Exit(1)
 	}
 
-	chatService := service.NewChatService(providerManager, settings.Retry)
+	chatService := service.NewChatService(providerManager, settings.Retry, usageRepo)
 	handler := httpapi.NewHandler(chatService)
 	router := httpapi.NewRouter(handler, settings.GatewayAPIKey)
 

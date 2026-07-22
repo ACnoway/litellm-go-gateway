@@ -15,11 +15,13 @@ Key deps: Gin (HTTP), Kratos v2 (app lifecycle), godotenv (config)
 ```
 cmd/gateway/main.go          wiring only — no logic here
 internal/biz/chat.go         domain types + Provider interface
+internal/biz/usage.go        usage log domain model + UsageRepo interface
 internal/config/config.go    env loading
+internal/data/usage.go       SQLite implementation of UsageRepo
 internal/provider/openai/    OpenAI adapter (implements biz.Provider)
 internal/provider/manager.go provider auto-discovery and routing
 internal/provider/registry.go name → provider lookup
-internal/service/chat.go     orchestration (retries, routing go here)
+internal/service/chat.go     orchestration (retries, routing, usage logging)
 internal/transport/httpapi/  Gin router + handlers + middleware
 internal/app/app.go          Kratos Server wrapper
 ```
@@ -115,12 +117,23 @@ go build -o bin/gateway ./cmd/gateway
 | Retry / fallback logic | `internal/service/chat.go` |
 | New HTTP endpoint | `internal/transport/httpapi/handler.go` + `router.go` |
 | New config variable | `internal/config/config.go` + `.env.example` |
-| Domain types | `internal/biz/chat.go` |
+| Domain types | `internal/biz/chat.go` or `internal/biz/usage.go` |
+| Data access (SQLite) | `internal/data/` |
 | App lifecycle (startup/shutdown hooks) | `internal/app/app.go` |
 
 ## Constraints
 
 - Keep `cmd/gateway/main.go` as pure wiring — no business logic.
 - `internal/biz` must not import any non-standard-library packages except other `biz` sub-packages.
-- `internal/transport` must not import `internal/provider` directly — only through `internal/service`.
+- `internal/data` implements interfaces defined in `internal/biz` — `biz` never imports `data`.
+- `internal/transport` must not import `internal/provider` or `internal/data` directly — only through `internal/service`.
 - Process environment variables always take precedence over `.env` file values (enforced in `config.go`).
+
+## Usage Logging
+
+Token usage is automatically logged to SQLite (`data/usage.db` by default) after each chat completion:
+- Request ID, provider, model, token counts (prompt/completion/total)
+- Success status and error code (if failed)
+- Request duration in milliseconds
+
+Logging is asynchronous and does not block the response to the client. The database is created automatically on first startup.

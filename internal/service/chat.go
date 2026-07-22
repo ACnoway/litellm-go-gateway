@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"syscall"
@@ -10,6 +11,7 @@ import (
 	"github.com/acnoway/litellm-go-gateway/internal/biz"
 	"github.com/acnoway/litellm-go-gateway/internal/config"
 	"github.com/acnoway/litellm-go-gateway/internal/pkg/logger"
+	"github.com/google/uuid"
 )
 
 // ChatService 是聊天用例的编排层。目前它只把调用委托给单个 provider；
@@ -18,40 +20,63 @@ import (
 type ChatService struct {
 	provider    biz.Provider
 	retryConfig config.RetryConfig
+	usageRepo   biz.UsageRepo
 }
 
 // NewChatService 通过接口注入 provider，便于替换实现和单元测试。
-func NewChatService(provider biz.Provider, retryConfig config.RetryConfig) *ChatService {
+func NewChatService(provider biz.Provider, retryConfig config.RetryConfig, usageRepo biz.UsageRepo) *ChatService {
 	return &ChatService{
 		provider:    provider,
 		retryConfig: retryConfig,
+		usageRepo:   usageRepo,
 	}
 }
 
 // Complete 执行非流式聊天调用。ctx 来自 HTTP 请求，客户端取消时会传递到上游请求。
 func (s *ChatService) Complete(ctx context.Context, request biz.ChatRequest) (biz.ChatResponse, error) {
 	log := logger.FromContext(ctx)
+	requestID := uuid.New().String()
+	startTime := time.Now()
+
 	log.Info("starting chat completion",
 		"model", request.Model,
 		"stream", false,
 		"provider", s.provider.Name(),
+		"request_id", requestID,
 	)
 
 	resp, err := s.withRetry(ctx, func() (biz.ChatResponse, error) {
 		return s.provider.Chat(ctx, request)
 	})
 
+	duration := time.Since(startTime).Milliseconds()
+	success := err == nil
+	errorCode := ""
+
 	if err != nil {
 		log.Error("chat completion failed",
 			"error", err,
 			"provider", s.provider.Name(),
+			"request_id", requestID,
 		)
+		var providerErr *biz.ProviderError
+		if errors.As(err, &providerErr) {
+			errorCode = providerErr.Code
+		}
+	} else {
+		log.Info("chat completion succeeded",
+			"provider", s.provider.Name(),
+			"request_id", requestID,
+		)
+	}
+
+	// 记录使用日志
+	s.recordUsage(ctx, requestID, request.Model, resp.Body, success, errorCode, duration)
+
+	if err != nil {
 		return biz.ChatResponse{}, err
 	}
 
-	log.Info("chat completion succeeded",
-		"provider", s.provider.Name(),
-	)
 	return resp, nil
 }
 
@@ -171,4 +196,56 @@ func isRetryableError(err error) bool {
 	}
 
 	return false
+}
+
+// recordUsage 从响应体中提取 token 使用信息并记录到数据库。
+// 响应体应该是 OpenAI 格式的 JSON，包含 usage 字段。
+func (s *ChatService) recordUsage(ctx context.Context, requestID string, model string, responseBody []byte, success bool, errorCode string, duration int64) {
+	log := logger.FromContext(ctx)
+
+	usageLog := &biz.UsageLog{
+		RequestID: requestID,
+		Provider:  s.provider.Name(),
+		Model:     model,
+		Success:   success,
+		ErrorCode: errorCode,
+		Duration:  duration,
+		CreatedAt: time.Now(),
+	}
+
+	// 如果请求成功，从响应体中提取 token 使用信息
+	if success && len(responseBody) > 0 {
+		var respData struct {
+			Usage struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				TotalTokens      int `json:"total_tokens"`
+			} `json:"usage"`
+		}
+
+		if err := json.Unmarshal(responseBody, &respData); err != nil {
+			log.Warn("failed to parse usage from response",
+				"error", err,
+				"request_id", requestID,
+			)
+		} else {
+			usageLog.PromptTokens = respData.Usage.PromptTokens
+			usageLog.CompletionTokens = respData.Usage.CompletionTokens
+			usageLog.TotalTokens = respData.Usage.TotalTokens
+		}
+	}
+
+	// 异步记录，不阻塞主流程
+	go func() {
+		// 使用新的 context 避免请求取消影响日志记录
+		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := s.usageRepo.Create(recordCtx, usageLog); err != nil {
+			log.Error("failed to record usage log",
+				"error", err,
+				"request_id", requestID,
+			)
+		}
+	}()
 }

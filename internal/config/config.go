@@ -16,9 +16,14 @@ type Config struct {
 	Address       string
 	GatewayAPIKey string
 	Retry         RetryConfig
+	Database      DatabaseConfig
 	OpenAI        OpenAIConfig
 	Anthropic     AnthropicConfig
 	Azure         AzureConfig
+}
+
+type DatabaseConfig struct {
+	Path string
 }
 
 type RetryConfig struct {
@@ -61,6 +66,9 @@ func Load() Config {
 			MaxAttempts:  intOrDefault("RETRY_MAX_ATTEMPTS", 3),
 			InitialDelay: durationOrDefault("RETRY_INITIAL_DELAY", 100*time.Millisecond),
 			MaxDelay:     durationOrDefault("RETRY_MAX_DELAY", 5*time.Second),
+		},
+		Database: DatabaseConfig{
+			Path: valueOrDefault("DATABASE_PATH", "./data/usage.db"),
 		},
 		OpenAI: OpenAIConfig{
 			APIKey:  os.Getenv("OPENAI_API_KEY"),

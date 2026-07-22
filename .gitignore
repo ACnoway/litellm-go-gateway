@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 
+# Database files
+/data/
+
 # Go build outputs
 /bin/
 /dist/
