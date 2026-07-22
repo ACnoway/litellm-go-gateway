@@ -6,9 +6,10 @@ import (
 
 // NewRouter 组装 Gin 路由与全局中间件。中间件注册顺序就是执行顺序：
 // panic 恢复最外层，随后写入请求 ID，再执行日志记录，最后才执行受保护接口的鉴权。
-func NewRouter(handler *Handler, gatewayAPIKey string) *gin.Engine {
+func NewRouter(handler *Handler, adminHandler *AdminHandler, gatewayAPIKey string) *gin.Engine {
 	router := gin.New()
 	router.Use(gin.Recovery(), requestID(), logging(), authorize(gatewayAPIKey))
 	handler.Register(router)
+	adminHandler.RegisterAdmin(router)
 	return router
 }

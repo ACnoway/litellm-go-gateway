@@ -25,8 +25,17 @@ func NewRegistry(providers ...biz.Provider) (*Registry, error) {
 	return &Registry{providers: registered}, nil
 }
 
-// Get 返回指定名称的 provider；第二个返回值区分“名称不存在”和“存在但值为空”。
+// Get 返回指定名称的 provider；第二个返回值区分”名称不存在”和”存在但值为空”。
 func (r *Registry) Get(name string) (biz.Provider, bool) {
 	provider, exists := r.providers[name]
 	return provider, exists
+}
+
+// All 返回所有已注册的 providers
+func (r *Registry) All() []biz.Provider {
+	providers := make([]biz.Provider, 0, len(r.providers))
+	for _, provider := range r.providers {
+		providers = append(providers, provider)
+	}
+	return providers
 }

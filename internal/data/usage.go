@@ -136,6 +136,15 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	CREATE INDEX IF NOT EXISTS idx_created_at ON usage_logs(created_at);
 	CREATE INDEX IF NOT EXISTS idx_provider ON usage_logs(provider);
 	CREATE INDEX IF NOT EXISTS idx_request_id ON usage_logs(request_id);
+
+	CREATE TABLE IF NOT EXISTS routing_rules (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		pattern TEXT NOT NULL UNIQUE,
+		providers TEXT NOT NULL,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_pattern ON routing_rules(pattern);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("failed to create schema: %w", err)

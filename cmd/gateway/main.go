@@ -50,16 +50,20 @@ func main() {
 	defer db.Close()
 
 	usageRepo := data.NewUsageRepo(db)
+	routingRepo := data.NewRoutingRuleRepo(db)
 
-	providerManager, err := provider.NewManager(settings)
+	providerManager, err := provider.NewManager(settings, db)
 	if err != nil {
 		slog.Error("provider setup failed", "error", err)
 		os.Exit(1)
 	}
 
 	chatService := service.NewChatService(providerManager, settings.Retry, usageRepo)
+	adminService := service.NewAdminService(providerManager, routingRepo)
+
 	handler := httpapi.NewHandler(chatService)
-	router := httpapi.NewRouter(handler, settings.GatewayAPIKey)
+	adminHandler := httpapi.NewAdminHandler(adminService)
+	router := httpapi.NewRouter(handler, adminHandler, settings.GatewayAPIKey)
 
 	server := app.NewHTTPServer(settings.Address, router)
 	application := app.New(server, log.NewStdLogger(os.Stdout))
