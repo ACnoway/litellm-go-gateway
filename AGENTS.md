@@ -156,3 +156,115 @@ Each model can be configured with multiple providers (primary + fallbacks). When
 2. **Streaming requests**: Try fallbacks only if the stream hasn't started yet
 
 See [docs/MODEL_ROUTING.md](docs/MODEL_ROUTING.md) and [docs/ROUTING_EXAMPLE.md](docs/ROUTING_EXAMPLE.md) for details.
+
+## Deployment Management API
+
+Deployments allow mapping logical model names (exposed to users) to physical provider instances with load balancing strategies.
+
+### API Endpoints
+
+All deployment endpoints are under `/admin/deployments` and require authentication.
+
+#### List All Deployments
+```
+GET /admin/deployments
+```
+
+**Response:**
+```json
+{
+  "object": "list",
+  "data": [
+    {
+      "id": 1,
+      "name": "gpt-4-turbo",
+      "actual_model": "gpt-4-turbo-2024-04-09",
+      "providers": ["openai", "azure"],
+      "strategy": "priority",
+      "weights": null,
+      "max_tokens": 128000,
+      "description": "GPT-4 Turbo with Azure fallback",
+      "enabled": true,
+      "created_at": "2026-07-22T10:00:00Z",
+      "updated_at": "2026-07-22T10:00:00Z"
+    }
+  ]
+}
+```
+
+#### Get Single Deployment
+```
+GET /admin/deployments/:id
+```
+
+**Response:** Single deployment object (same structure as list item above).
+
+#### Create Deployment
+```
+POST /admin/deployments
+Content-Type: application/json
+
+{
+  "name": "gpt-4-turbo",
+  "actual_model": "gpt-4-turbo-2024-04-09",
+  "providers": ["openai", "azure"],
+  "strategy": "priority",
+  "weights": null,
+  "max_tokens": 128000,
+  "description": "GPT-4 Turbo with Azure fallback",
+  "enabled": true
+}
+```
+
+**Fields:**
+- `name` (required): Logical model name exposed to users
+- `actual_model` (required): Physical model name sent to upstream providers
+- `providers` (required): Array of provider names (min 1)
+- `strategy` (optional): Load balancing strategy - `"priority"` (default), `"round-robin"`, or `"weighted"`
+- `weights` (optional): Array of integers for weighted strategy (must match providers length)
+- `max_tokens` (optional): Maximum token limit for this model
+- `description` (optional): Human-readable description
+- `enabled` (optional): Boolean, defaults to `true`
+
+**Response:** Created deployment object with `201 Created` status.
+
+#### Update Deployment
+```
+PUT /admin/deployments/:id
+Content-Type: application/json
+
+{
+  "name": "gpt-4-turbo",
+  "actual_model": "gpt-4-turbo-2024-04-09",
+  "providers": ["openai", "azure"],
+  "strategy": "round-robin",
+  "max_tokens": 128000,
+  "description": "Updated description",
+  "enabled": true
+}
+```
+
+**Response:** Updated deployment object with `200 OK` status.
+
+#### Delete Deployment
+```
+DELETE /admin/deployments/:id
+```
+
+**Response:** `204 No Content` on success.
+
+### Load Balancing Strategies
+
+- **`priority`** (default): Always use the first provider, fallback to subsequent providers only on failure
+- **`round-robin`**: Distribute requests evenly across all providers
+- **`weighted`**: Distribute requests based on the weights array (requires `weights` field)
+
+### Validation Rules
+
+1. Strategy must be one of: `priority`, `round-robin`, `weighted`
+2. For `weighted` strategy:
+   - `weights` array length must match `providers` array length
+   - All weights must be positive integers
+3. Deployment name must be unique
+4. At least one provider must be specified
+

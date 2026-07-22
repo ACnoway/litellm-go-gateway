@@ -145,6 +145,22 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		updated_at DATETIME NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_pattern ON routing_rules(pattern);
+
+	CREATE TABLE IF NOT EXISTS deployments (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		actual_model TEXT NOT NULL,
+		providers TEXT NOT NULL,
+		strategy TEXT NOT NULL DEFAULT 'priority',
+		weights TEXT,
+		max_tokens INTEGER DEFAULT 0,
+		description TEXT,
+		enabled BOOLEAN NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_deployment_name ON deployments(name);
+	CREATE INDEX IF NOT EXISTS idx_deployment_enabled ON deployments(enabled);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("failed to create schema: %w", err)

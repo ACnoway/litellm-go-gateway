@@ -11,12 +11,16 @@ import (
 
 // AdminHandler 处理管理 API 请求
 type AdminHandler struct {
-	adminService *service.AdminService
+	adminService       *service.AdminService
+	deploymentService  *service.DeploymentService
 }
 
 // NewAdminHandler 创建管理 API handler
-func NewAdminHandler(adminService *service.AdminService) *AdminHandler {
-	return &AdminHandler{adminService: adminService}
+func NewAdminHandler(adminService *service.AdminService, deploymentService *service.DeploymentService) *AdminHandler {
+	return &AdminHandler{
+		adminService:      adminService,
+		deploymentService: deploymentService,
+	}
 }
 
 // RegisterAdmin 注册管理 API 路由
@@ -33,6 +37,13 @@ func (h *AdminHandler) RegisterAdmin(router *gin.Engine) {
 		admin.POST("/routing/rules", h.createRoutingRule)
 		admin.PUT("/routing/rules/:id", h.updateRoutingRule)
 		admin.DELETE("/routing/rules/:id", h.deleteRoutingRule)
+
+		// Deployment 管理
+		admin.GET("/deployments", h.listDeployments)
+		admin.GET("/deployments/:id", h.getDeployment)
+		admin.POST("/deployments", h.createDeployment)
+		admin.PUT("/deployments/:id", h.updateDeployment)
+		admin.DELETE("/deployments/:id", h.deleteDeployment)
 	}
 }
 
@@ -204,3 +215,144 @@ func (h *AdminHandler) deleteRoutingRule(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// listDeployments 返回所有 deployments
+func (h *AdminHandler) listDeployments(c *gin.Context) {
+	deployments, err := h.deploymentService.ListDeployments(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"message": err.Error(),
+				"type":    "internal_error",
+				"code":    "database_error",
+			},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"object": "list",
+		"data":   deployments,
+	})
+}
+
+// getDeployment 返回单个 deployment
+func (h *AdminHandler) getDeployment(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"message": "invalid deployment id",
+				"type":    "invalid_request_error",
+				"code":    "invalid_id",
+			},
+		})
+		return
+	}
+
+	deployment, err := h.deploymentService.GetDeployment(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": gin.H{
+				"message": err.Error(),
+				"type":    "not_found",
+				"code":    "deployment_not_found",
+			},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, deployment)
+}
+
+// createDeployment 创建新的 deployment
+func (h *AdminHandler) createDeployment(c *gin.Context) {
+	var req biz.DeploymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"message": err.Error(),
+				"type":    "invalid_request_error",
+				"code":    "invalid_request",
+			},
+		})
+		return
+	}
+
+	deployment, err := h.deploymentService.CreateDeployment(c.Request.Context(), req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"message": err.Error(),
+				"type":    "invalid_request_error",
+				"code":    "creation_failed",
+			},
+		})
+		return
+	}
+	c.JSON(http.StatusCreated, deployment)
+}
+
+// updateDeployment 更新 deployment
+func (h *AdminHandler) updateDeployment(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"message": "invalid deployment id",
+				"type":    "invalid_request_error",
+				"code":    "invalid_id",
+			},
+		})
+		return
+	}
+
+	var req biz.DeploymentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"message": err.Error(),
+				"type":    "invalid_request_error",
+				"code":    "invalid_request",
+			},
+		})
+		return
+	}
+
+	deployment, err := h.deploymentService.UpdateDeployment(c.Request.Context(), id, req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"message": err.Error(),
+				"type":    "invalid_request_error",
+				"code":    "update_failed",
+			},
+		})
+		return
+	}
+	c.JSON(http.StatusOK, deployment)
+}
+
+// deleteDeployment 删除 deployment
+func (h *AdminHandler) deleteDeployment(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"message": "invalid deployment id",
+				"type":    "invalid_request_error",
+				"code":    "invalid_id",
+			},
+		})
+		return
+	}
+
+	if err := h.deploymentService.DeleteDeployment(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{
+			"error": gin.H{
+				"message": err.Error(),
+				"type":    "not_found",
+				"code":    "deployment_not_found",
+			},
+		})
+		return
+	}
+	c.Status(http.StatusNoContent)
+}

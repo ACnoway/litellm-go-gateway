@@ -51,6 +51,7 @@ func main() {
 
 	usageRepo := data.NewUsageRepo(db)
 	routingRepo := data.NewRoutingRuleRepo(db)
+	deploymentRepo := data.NewDeploymentRepo(db)
 
 	providerManager, err := provider.NewManager(settings, db)
 	if err != nil {
@@ -60,9 +61,10 @@ func main() {
 
 	chatService := service.NewChatService(providerManager, settings.Retry, usageRepo)
 	adminService := service.NewAdminService(providerManager, routingRepo)
+	deploymentService := service.NewDeploymentService(deploymentRepo)
 
 	handler := httpapi.NewHandler(chatService)
-	adminHandler := httpapi.NewAdminHandler(adminService)
+	adminHandler := httpapi.NewAdminHandler(adminService, deploymentService)
 	router := httpapi.NewRouter(handler, adminHandler, settings.GatewayAPIKey)
 
 	server := app.NewHTTPServer(settings.Address, router)
