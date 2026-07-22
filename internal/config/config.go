@@ -17,6 +17,7 @@ type Config struct {
 	GatewayAPIKey string
 	Retry         RetryConfig
 	Database      DatabaseConfig
+	Routing       RoutingConfig
 	OpenAI        OpenAIConfig
 	Anthropic     AnthropicConfig
 	Azure         AzureConfig
@@ -30,6 +31,15 @@ type RetryConfig struct {
 	MaxAttempts int
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
+}
+
+type RoutingConfig struct {
+	Rules []RoutingRule
+}
+
+type RoutingRule struct {
+	Pattern   string   // 模型名匹配模式（正则表达式）
+	Providers []string // provider 名称列表（按优先级排序）
 }
 
 // OpenAIConfig 保存连接 OpenAI HTTP API 所需的信息。

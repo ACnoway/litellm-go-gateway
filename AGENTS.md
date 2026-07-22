@@ -16,12 +16,13 @@ Key deps: Gin (HTTP), Kratos v2 (app lifecycle), godotenv (config)
 cmd/gateway/main.go          wiring only — no logic here
 internal/biz/chat.go         domain types + Provider interface
 internal/biz/usage.go        usage log domain model + UsageRepo interface
-internal/config/config.go    env loading
+internal/config/config.go    env loading + routing configuration
 internal/data/usage.go       SQLite implementation of UsageRepo
 internal/provider/openai/    OpenAI adapter (implements biz.Provider)
 internal/provider/manager.go provider auto-discovery and routing
+internal/provider/router.go  model-to-provider routing logic
 internal/provider/registry.go name → provider lookup
-internal/service/chat.go     orchestration (retries, routing, usage logging)
+internal/service/chat.go     orchestration (retries, routing, fallback, usage logging)
 internal/transport/httpapi/  Gin router + handlers + middleware
 internal/app/app.go          Kratos Server wrapper
 ```
@@ -114,6 +115,7 @@ go build -o bin/gateway ./cmd/gateway
 | Concern | Where to put it |
 |---|---|
 | New upstream provider | `internal/provider/<name>/` |
+| Model routing rules | `internal/provider/router.go` or `internal/config/config.go` |
 | Retry / fallback logic | `internal/service/chat.go` |
 | New HTTP endpoint | `internal/transport/httpapi/handler.go` + `router.go` |
 | New config variable | `internal/config/config.go` + `.env.example` |
@@ -137,3 +139,20 @@ Token usage is automatically logged to SQLite (`data/usage.db` by default) after
 - Request duration in milliseconds
 
 Logging is asynchronous and does not block the response to the client. The database is created automatically on first startup.
+
+## Model Routing
+
+The gateway automatically routes requests to the appropriate provider based on the model name:
+
+- `gpt-*`, `text-*`, `davinci*` → OpenAI provider
+- `claude-*` → Anthropic provider
+- Unknown models → First available provider (fallback)
+
+### Automatic Fallback
+
+Each model can be configured with multiple providers (primary + fallbacks). When the primary provider fails:
+
+1. **Non-streaming requests**: Try each provider in order until one succeeds
+2. **Streaming requests**: Try fallbacks only if the stream hasn't started yet
+
+See [docs/MODEL_ROUTING.md](docs/MODEL_ROUTING.md) and [docs/ROUTING_EXAMPLE.md](docs/ROUTING_EXAMPLE.md) for details.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"syscall"
 	"time"
@@ -14,95 +15,160 @@ import (
 	"github.com/google/uuid"
 )
 
-// ChatService 是聊天用例的编排层。目前它只把调用委托给单个 provider；
-// 后续鉴权结果、模型 deployment 路由、重试、fallback 和用量统计都应加入此层，
-// 而非散落到 Gin Handler 或具体的 provider adapter。
+// ChatService 是聊天用例的编排层。负责模型路由、重试、fallback 和用量统计。
 type ChatService struct {
-	provider    biz.Provider
+	providerManager interface {
+		Chat(context.Context, biz.ChatRequest) (biz.ChatResponse, error)
+		ChatStream(context.Context, biz.ChatRequest) (biz.ChatStream, error)
+		GetProvidersForModel(string) []biz.Provider
+		Name() string
+	}
 	retryConfig config.RetryConfig
 	usageRepo   biz.UsageRepo
 }
 
-// NewChatService 通过接口注入 provider，便于替换实现和单元测试。
-func NewChatService(provider biz.Provider, retryConfig config.RetryConfig, usageRepo biz.UsageRepo) *ChatService {
+// NewChatService 通过接口注入 provider manager，便于替换实现和单元测试。
+func NewChatService(providerManager interface {
+	Chat(context.Context, biz.ChatRequest) (biz.ChatResponse, error)
+	ChatStream(context.Context, biz.ChatRequest) (biz.ChatStream, error)
+	GetProvidersForModel(string) []biz.Provider
+	Name() string
+}, retryConfig config.RetryConfig, usageRepo biz.UsageRepo) *ChatService {
 	return &ChatService{
-		provider:    provider,
-		retryConfig: retryConfig,
-		usageRepo:   usageRepo,
+		providerManager: providerManager,
+		retryConfig:     retryConfig,
+		usageRepo:       usageRepo,
 	}
 }
 
 // Complete 执行非流式聊天调用。ctx 来自 HTTP 请求，客户端取消时会传递到上游请求。
+// 支持自动 fallback：如果主 provider 失败，会自动尝试备用 providers。
 func (s *ChatService) Complete(ctx context.Context, request biz.ChatRequest) (biz.ChatResponse, error) {
 	log := logger.FromContext(ctx)
 	requestID := uuid.New().String()
 	startTime := time.Now()
 
+	providers := s.providerManager.GetProvidersForModel(request.Model)
+	if len(providers) == 0 {
+		return biz.ChatResponse{}, fmt.Errorf("no provider available for model %s", request.Model)
+	}
+
 	log.Info("starting chat completion",
 		"model", request.Model,
 		"stream", false,
-		"provider", s.provider.Name(),
+		"primary_provider", providers[0].Name(),
+		"fallback_count", len(providers)-1,
 		"request_id", requestID,
 	)
 
-	resp, err := s.withRetry(ctx, func() (biz.ChatResponse, error) {
-		return s.provider.Chat(ctx, request)
-	})
+	var lastErr error
+	var resp biz.ChatResponse
 
-	duration := time.Since(startTime).Milliseconds()
-	success := err == nil
-	errorCode := ""
-
-	if err != nil {
-		log.Error("chat completion failed",
-			"error", err,
-			"provider", s.provider.Name(),
-			"request_id", requestID,
-		)
-		var providerErr *biz.ProviderError
-		if errors.As(err, &providerErr) {
-			errorCode = providerErr.Code
+	// 依次尝试所有可用的 providers
+	for i, provider := range providers {
+		providerName := provider.Name()
+		if i > 0 {
+			log.Info("trying fallback provider",
+				"provider", providerName,
+				"attempt", i+1,
+				"total_providers", len(providers),
+				"request_id", requestID,
+			)
 		}
-	} else {
-		log.Info("chat completion succeeded",
-			"provider", s.provider.Name(),
+
+		resp, lastErr = s.withRetry(ctx, func() (biz.ChatResponse, error) {
+			return provider.Chat(ctx, request)
+		})
+
+		if lastErr == nil {
+			// 成功，记录使用日志并返回
+			duration := time.Since(startTime).Milliseconds()
+			log.Info("chat completion succeeded",
+				"provider", providerName,
+				"request_id", requestID,
+			)
+			s.recordUsage(ctx, requestID, request.Model, resp.Body, true, "", duration)
+			return resp, nil
+		}
+
+		// 失败，记录错误
+		log.Warn("provider failed",
+			"provider", providerName,
+			"error", lastErr,
 			"request_id", requestID,
 		)
 	}
 
-	// 记录使用日志
-	s.recordUsage(ctx, requestID, request.Model, resp.Body, success, errorCode, duration)
-
-	if err != nil {
-		return biz.ChatResponse{}, err
+	// 所有 providers 都失败了
+	duration := time.Since(startTime).Milliseconds()
+	errorCode := ""
+	var providerErr *biz.ProviderError
+	if errors.As(lastErr, &providerErr) {
+		errorCode = providerErr.Code
 	}
 
-	return resp, nil
+	log.Error("all providers failed",
+		"error", lastErr,
+		"request_id", requestID,
+		"providers_tried", len(providers),
+	)
+
+	s.recordUsage(ctx, requestID, request.Model, nil, false, errorCode, duration)
+	return biz.ChatResponse{}, lastErr
 }
 
 // CompleteStream 执行流式聊天调用，并把仍打开的上游流交给 Handler 转发。
 // 流式请求不重试，因为响应体已经开始传输，中途重试会导致客户端收到重复或错误的数据。
+// 但支持 fallback：如果主 provider 在建立流之前失败，会尝试备用 providers。
 func (s *ChatService) CompleteStream(ctx context.Context, request biz.ChatRequest) (biz.ChatStream, error) {
 	log := logger.FromContext(ctx)
+
+	providers := s.providerManager.GetProvidersForModel(request.Model)
+	if len(providers) == 0 {
+		return biz.ChatStream{}, fmt.Errorf("no provider available for model %s", request.Model)
+	}
+
 	log.Info("starting chat stream",
 		"model", request.Model,
 		"stream", true,
-		"provider", s.provider.Name(),
+		"primary_provider", providers[0].Name(),
+		"fallback_count", len(providers)-1,
 	)
 
-	stream, err := s.provider.ChatStream(ctx, request)
-	if err != nil {
-		log.Error("chat stream failed",
+	var lastErr error
+
+	// 依次尝试所有可用的 providers
+	for i, provider := range providers {
+		providerName := provider.Name()
+		if i > 0 {
+			log.Info("trying fallback provider for stream",
+				"provider", providerName,
+				"attempt", i+1,
+				"total_providers", len(providers),
+			)
+		}
+
+		stream, err := provider.ChatStream(ctx, request)
+		if err == nil {
+			log.Info("chat stream started",
+				"provider", providerName,
+			)
+			return stream, nil
+		}
+
+		lastErr = err
+		log.Warn("provider stream failed",
+			"provider", providerName,
 			"error", err,
-			"provider", s.provider.Name(),
 		)
-		return biz.ChatStream{}, err
 	}
 
-	log.Info("chat stream started",
-		"provider", s.provider.Name(),
+	// 所有 providers 都失败了
+	log.Error("all providers failed for stream",
+		"error", lastErr,
+		"providers_tried", len(providers),
 	)
-	return stream, nil
+	return biz.ChatStream{}, lastErr
 }
 
 // withRetry 实现指数退避重试逻辑。只对网络错误（连接失败、超时、DNS 解析失败）重试，
@@ -205,7 +271,7 @@ func (s *ChatService) recordUsage(ctx context.Context, requestID string, model s
 
 	usageLog := &biz.UsageLog{
 		RequestID: requestID,
-		Provider:  s.provider.Name(),
+		Provider:  s.providerManager.Name(),
 		Model:     model,
 		Success:   success,
 		ErrorCode: errorCode,
