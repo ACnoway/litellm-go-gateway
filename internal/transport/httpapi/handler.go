@@ -8,6 +8,7 @@ import (
 	"github.com/acnoway/litellm-go-gateway/internal/biz"
 	"github.com/acnoway/litellm-go-gateway/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Handler 是 OpenAI-compatible HTTP 协议层。它负责 JSON/SSE 和 HTTP 状态码，
@@ -26,6 +27,7 @@ func NewHandler(chatService *service.ChatService) *Handler {
 func (h *Handler) Register(router gin.IRoutes) {
 	router.GET("/healthz", h.health)
 	router.GET("/readyz", h.health)
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	router.GET("/v1/models", h.models)
 	router.POST("/v1/chat/completions", h.chatCompletions)
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/acnoway/litellm-go-gateway/internal/biz"
 	"github.com/acnoway/litellm-go-gateway/internal/config"
 	"github.com/acnoway/litellm-go-gateway/internal/pkg/logger"
+	"github.com/acnoway/litellm-go-gateway/internal/pkg/metrics"
 	"github.com/google/uuid"
 )
 
@@ -67,6 +68,8 @@ func (s *ChatService) Complete(ctx context.Context, request biz.ChatRequest) (bi
 	// 依次尝试所有可用的 providers
 	for i, provider := range providers {
 		providerName := provider.Name()
+		providerStartTime := time.Now()
+
 		if i > 0 {
 			log.Info("trying fallback provider",
 				"provider", providerName,
@@ -80,23 +83,32 @@ func (s *ChatService) Complete(ctx context.Context, request biz.ChatRequest) (bi
 			return provider.Chat(ctx, request)
 		})
 
+		providerDuration := time.Since(providerStartTime)
+
 		if lastErr == nil {
-			// 成功，记录使用日志并返回
+			// 成功，记录使用日志、metrics 并返回
 			duration := time.Since(startTime).Milliseconds()
 			log.Info("chat completion succeeded",
 				"provider", providerName,
 				"request_id", requestID,
 			)
-			s.recordUsage(ctx, requestID, request.Model, resp.Body, true, "", duration)
+
+			// 记录 provider 调用成功的 metrics
+			metrics.RecordProviderCall(providerName, request.Model, "success", providerDuration)
+
+			s.recordUsage(ctx, requestID, request.Model, resp.Body, true, "", duration, providerName)
 			return resp, nil
 		}
 
-		// 失败，记录错误
+		// 失败，记录错误和 metrics
 		log.Warn("provider failed",
 			"provider", providerName,
 			"error", lastErr,
 			"request_id", requestID,
 		)
+
+		// 记录 provider 调用失败的 metrics
+		metrics.RecordProviderCall(providerName, request.Model, "error", providerDuration)
 	}
 
 	// 所有 providers 都失败了
@@ -113,7 +125,13 @@ func (s *ChatService) Complete(ctx context.Context, request biz.ChatRequest) (bi
 		"providers_tried", len(providers),
 	)
 
-	s.recordUsage(ctx, requestID, request.Model, nil, false, errorCode, duration)
+	// 记录失败的最后一个 provider 名称
+	lastProviderName := ""
+	if len(providers) > 0 {
+		lastProviderName = providers[len(providers)-1].Name()
+	}
+
+	s.recordUsage(ctx, requestID, request.Model, nil, false, errorCode, duration, lastProviderName)
 	return biz.ChatResponse{}, lastErr
 }
 
@@ -264,14 +282,14 @@ func isRetryableError(err error) bool {
 	return false
 }
 
-// recordUsage 从响应体中提取 token 使用信息并记录到数据库。
+// recordUsage 从响应体中提取 token 使用信息并记录到数据库和 metrics。
 // 响应体应该是 OpenAI 格式的 JSON，包含 usage 字段。
-func (s *ChatService) recordUsage(ctx context.Context, requestID string, model string, responseBody []byte, success bool, errorCode string, duration int64) {
+func (s *ChatService) recordUsage(ctx context.Context, requestID string, model string, responseBody []byte, success bool, errorCode string, duration int64, providerName string) {
 	log := logger.FromContext(ctx)
 
 	usageLog := &biz.UsageLog{
 		RequestID: requestID,
-		Provider:  s.providerManager.Name(),
+		Provider:  providerName,
 		Model:     model,
 		Success:   success,
 		ErrorCode: errorCode,
@@ -298,6 +316,9 @@ func (s *ChatService) recordUsage(ctx context.Context, requestID string, model s
 			usageLog.PromptTokens = respData.Usage.PromptTokens
 			usageLog.CompletionTokens = respData.Usage.CompletionTokens
 			usageLog.TotalTokens = respData.Usage.TotalTokens
+
+			// 记录 token 使用的 metrics
+			metrics.RecordTokenUsage(providerName, model, respData.Usage.PromptTokens, respData.Usage.CompletionTokens)
 		}
 	}
 

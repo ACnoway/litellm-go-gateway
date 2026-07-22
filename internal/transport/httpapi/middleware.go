@@ -5,10 +5,12 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/acnoway/litellm-go-gateway/internal/pkg/logger"
+	"github.com/acnoway/litellm-go-gateway/internal/pkg/metrics"
 	"github.com/gin-gonic/gin"
 )
 
@@ -43,9 +45,11 @@ func newRequestID() string {
 
 // authorize 目前实现单个 Gateway API Key。若未设置 GATEWAY_API_KEY，则为了本地开发
 // 放行全部请求；生产环境应始终设置它，后续再替换为虚拟 Key/用户/团队鉴权。
+// /healthz, /readyz, /metrics 端点无需鉴权，便于监控系统访问。
 func authorize(apiKey string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if apiKey == "" || c.Request.URL.Path == "/healthz" || c.Request.URL.Path == "/readyz" {
+		path := c.Request.URL.Path
+		if apiKey == "" || path == "/healthz" || path == "/readyz" || path == "/metrics" {
 			c.Next()
 			return
 		}
@@ -87,5 +91,30 @@ func logging() gin.HandlerFunc {
 			"duration_ms", duration.Milliseconds(),
 			"client_ip", c.ClientIP(),
 		)
+	}
+}
+
+// metricsMiddleware 记录 Prometheus metrics：请求总数、响应时间、错误率。
+// 应在 logging 中间件之后执行，以确保所有请求都被记录。
+// /metrics 端点本身不记录指标，避免递归。
+func metricsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		method := c.Request.Method
+
+		// 处理请求
+		c.Next()
+
+		// 跳过 /metrics 端点本身，避免递归
+		if path == "/metrics" {
+			return
+		}
+
+		duration := time.Since(start)
+		status := strconv.Itoa(c.Writer.Status())
+
+		// 记录指标
+		metrics.RecordHTTPRequest(path, method, status, duration)
 	}
 }
