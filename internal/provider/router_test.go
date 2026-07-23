@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/acnoway/litellm-go-gateway/internal/biz"
@@ -24,55 +25,115 @@ func (m *mockProvider) ChatStream(ctx context.Context, req biz.ChatRequest) (biz
 	return biz.ChatStream{}, nil
 }
 
-func TestModelRouter_AddRoute(t *testing.T) {
-	openai := &mockProvider{name: "openai"}
-	anthropic := &mockProvider{name: "anthropic"}
-
-	router := NewModelRouter(openai)
-
-	// 添加路由规则
-	err := router.AddRoute("^gpt-.*", openai)
-	if err != nil {
-		t.Fatalf("failed to add route: %v", err)
-	}
-
-	err = router.AddRoute("^claude-.*", anthropic)
-	if err != nil {
-		t.Fatalf("failed to add route: %v", err)
-	}
-
-	// 测试空 providers 列表
-	err = router.AddRoute("^test-.*")
-	if err == nil {
-		t.Fatal("expected error for empty providers list")
-	}
-
-	// 测试无效的正则表达式
-	err = router.AddRoute("[invalid", openai)
-	if err == nil {
-		t.Fatal("expected error for invalid regex pattern")
-	}
+// mockDeploymentRepo 是用于测试的模拟 deployment repo
+type mockDeploymentRepo struct {
+	deployments map[string]*biz.Deployment
 }
 
-func TestModelRouter_Route(t *testing.T) {
+func (r *mockDeploymentRepo) List(ctx context.Context) ([]*biz.Deployment, error) {
+	result := make([]*biz.Deployment, 0, len(r.deployments))
+	for _, d := range r.deployments {
+		result = append(result, d)
+	}
+	return result, nil
+}
+
+func (r *mockDeploymentRepo) ListEnabled(ctx context.Context) ([]*biz.Deployment, error) {
+	return r.List(ctx)
+}
+
+func (r *mockDeploymentRepo) Get(ctx context.Context, id int64) (*biz.Deployment, error) {
+	for _, d := range r.deployments {
+		if d.ID == id {
+			return d, nil
+		}
+	}
+	return nil, fmt.Errorf("deployment not found: id=%d", id)
+}
+
+func (r *mockDeploymentRepo) GetByName(ctx context.Context, name string) (*biz.Deployment, error) {
+	if d, exists := r.deployments[name]; exists {
+		return d, nil
+	}
+	return nil, fmt.Errorf("deployment not found: name=%s", name)
+}
+
+func (r *mockDeploymentRepo) Create(ctx context.Context, d *biz.Deployment) error {
+	if _, exists := r.deployments[d.Name]; exists {
+		return fmt.Errorf("deployment already exists: name=%s", d.Name)
+	}
+	r.deployments[d.Name] = d
+	return nil
+}
+
+func (r *mockDeploymentRepo) Update(ctx context.Context, d *biz.Deployment) error {
+	if _, exists := r.deployments[d.Name]; !exists {
+		return fmt.Errorf("deployment not found: name=%s", d.Name)
+	}
+	r.deployments[d.Name] = d
+	return nil
+}
+
+func (r *mockDeploymentRepo) Delete(ctx context.Context, id int64) error {
+	for name, d := range r.deployments {
+		if d.ID == id {
+			delete(r.deployments, name)
+			return nil
+		}
+	}
+	return fmt.Errorf("deployment not found: id=%d", id)
+}
+
+// mockRegistry 是用于测试的模拟 registry（实现 ProviderRegistry 接口）
+type mockRegistry struct {
+	providers map[string]biz.Provider
+}
+
+func (r *mockRegistry) Get(name string) (biz.Provider, bool) {
+	p, exists := r.providers[name]
+	return p, exists
+}
+
+func (r *mockRegistry) All() []biz.Provider {
+	providers := make([]biz.Provider, 0, len(r.providers))
+	for _, p := range r.providers {
+		providers = append(providers, p)
+	}
+	return providers
+}
+
+func TestDeploymentRouter_Route(t *testing.T) {
 	openai := &mockProvider{name: "openai"}
 	anthropic := &mockProvider{name: "anthropic"}
-	azure := &mockProvider{name: "azure"}
 
-	router := NewModelRouter(openai)
+	registry := &mockRegistry{
+		providers: map[string]biz.Provider{
+			"openai":    openai,
+			"anthropic": anthropic,
+		},
+	}
 
-	// 添加路由规则
-	_ = router.AddRoute("^gpt-.*", openai, azure)
-	_ = router.AddRoute("^claude-.*", anthropic)
+	repo := &mockDeploymentRepo{
+		deployments: map[string]*biz.Deployment{
+			"gpt-4": {
+				Name:      "gpt-4",
+				Providers: []string{"openai"},
+			},
+			"claude-3": {
+				Name:      "claude-3",
+				Providers: []string{"anthropic"},
+			},
+		},
+	}
+
+	router := NewDeploymentRouter(repo, registry, openai)
 
 	tests := []struct {
 		model             string
 		expectedProviders []string
 	}{
-		{"gpt-4", []string{"openai", "azure"}},
-		{"gpt-3.5-turbo", []string{"openai", "azure"}},
+		{"gpt-4", []string{"openai"}},
 		{"claude-3-opus", []string{"anthropic"}},
-		{"claude-2", []string{"anthropic"}},
 		{"unknown-model", []string{"openai"}}, // fallback
 	}
 
@@ -92,15 +153,31 @@ func TestModelRouter_Route(t *testing.T) {
 	}
 }
 
-func TestModelRouter_GetPrimaryProvider(t *testing.T) {
+func TestDeploymentRouter_GetPrimaryProvider(t *testing.T) {
 	openai := &mockProvider{name: "openai"}
 	anthropic := &mockProvider{name: "anthropic"}
-	azure := &mockProvider{name: "azure"}
 
-	router := NewModelRouter(openai)
+	registry := &mockRegistry{
+		providers: map[string]biz.Provider{
+			"openai":    openai,
+			"anthropic": anthropic,
+		},
+	}
 
-	_ = router.AddRoute("^gpt-.*", openai, azure)
-	_ = router.AddRoute("^claude-.*", anthropic)
+	repo := &mockDeploymentRepo{
+		deployments: map[string]*biz.Deployment{
+			"gpt-4": {
+				Name:      "gpt-4",
+				Providers: []string{"openai"},
+			},
+			"claude-3": {
+				Name:      "claude-3",
+				Providers: []string{"anthropic"},
+			},
+		},
+	}
+
+	router := NewDeploymentRouter(repo, registry, openai)
 
 	tests := []struct {
 		model            string
@@ -124,20 +201,38 @@ func TestModelRouter_GetPrimaryProvider(t *testing.T) {
 	}
 }
 
-func TestModelRouter_GetFallbackProviders(t *testing.T) {
+func TestDeploymentRouter_GetFallbackProviders(t *testing.T) {
 	openai := &mockProvider{name: "openai"}
 	anthropic := &mockProvider{name: "anthropic"}
 	azure := &mockProvider{name: "azure"}
 
-	router := NewModelRouter(openai)
+	registry := &mockRegistry{
+		providers: map[string]biz.Provider{
+			"openai":    openai,
+			"anthropic": anthropic,
+			"azure":     azure,
+		},
+	}
 
-	_ = router.AddRoute("^gpt-.*", openai, azure, anthropic)
-	_ = router.AddRoute("^claude-.*", anthropic)
+	repo := &mockDeploymentRepo{
+		deployments: map[string]*biz.Deployment{
+			"gpt-4": {
+				Name:      "gpt-4",
+				Providers: []string{"openai", "azure", "anthropic"},
+			},
+			"claude-3": {
+				Name:      "claude-3",
+				Providers: []string{"anthropic"},
+			},
+		},
+	}
+
+	router := NewDeploymentRouter(repo, registry, openai)
 
 	tests := []struct {
-		model                   string
-		expectedFallbackCount   int
-		expectedFallbackNames   []string
+		model                 string
+		expectedFallbackCount int
+		expectedFallbackNames []string
 	}{
 		{"gpt-4", 2, []string{"azure", "anthropic"}},
 		{"claude-3-opus", 0, nil},
@@ -160,8 +255,16 @@ func TestModelRouter_GetFallbackProviders(t *testing.T) {
 	}
 }
 
-func TestModelRouter_NoFallback(t *testing.T) {
-	router := NewModelRouter(nil)
+func TestDeploymentRouter_NoFallback(t *testing.T) {
+	registry := &mockRegistry{
+		providers: map[string]biz.Provider{},
+	}
+
+	repo := &mockDeploymentRepo{
+		deployments: map[string]*biz.Deployment{},
+	}
+
+	router := NewDeploymentRouter(repo, registry, nil)
 
 	providers := router.Route("any-model")
 	if providers != nil {
