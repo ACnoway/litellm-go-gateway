@@ -35,6 +35,39 @@ This project follows **hexagonal architecture** (ports & adapters) with strict l
 2. **Interface Segregation**: Business logic depends on interfaces (e.g., `biz.Provider`, `biz.UsageRepo`), allowing adapters to be swapped without changing the core.
 3. **Single Responsibility**: Each layer has exactly one reason to change.
 
+### Deployment Routing Rule (CRITICAL)
+
+**Deployment names must match model names EXACTLY.** The `DeploymentRouter` uses `DeploymentRepo.GetByName()` for precise matching, not prefix matching.
+
+```go
+// ✅ CORRECT: Exact match
+// Deployment name: "gpt-4-turbo"
+// Request model: "gpt-4-turbo" → matches
+// Request model: "gpt-4-turbo-2024-04-09" → NO match (uses fallback)
+
+// ❌ WRONG: Expecting prefix match
+// Deployment name: "claude-3"
+// Request model: "claude-3-opus" → NO match (uses fallback)
+// To support "claude-3-opus", create a separate deployment with name "claude-3-opus"
+```
+
+**Why exact match?**
+- Predictability: No ambiguity about which deployment handles which model
+- Safety: Prevents accidental routing due to partial name matches
+- Explicit configuration: Each model version gets its own deployment entry
+
+**How to handle model variants:**
+```bash
+# Create separate deployments for each variant
+curl -X POST http://localhost:8080/admin/deployments \
+  -H "Authorization: Bearer <key>" \
+  -d '{"name": "claude-3-opus", "providers": ["anthropic"], ...}'
+
+curl -X POST http://localhost:8080/admin/deployments \
+  -H "Authorization: Bearer <key>" \
+  -d '{"name": "claude-3-sonnet", "providers": ["anthropic"], ...}'
+```
+
 ### Layer Responsibilities
 
 | Layer | Purpose | May import | May NOT import |
@@ -178,7 +211,26 @@ ChatService uses returned providers in order:
 **Deployment features**:
 - Maps logical model names (e.g., `"gpt-4-turbo"`) to physical model names (e.g., `"gpt-4-turbo-2024-04-09"`).
 - Supports multiple providers per model for automatic fallback.
+- **Exact match only**: Deployment name must match model name exactly (no prefix matching).
 - Load balancing strategies (future): `priority` (default), `round-robin`, `weighted`.
+
+**Deployment matching examples**:
+```yaml
+# ✅ Correct: Exact match
+deployment name: "gpt-4-turbo"
+request model: "gpt-4-turbo"  # → matches
+
+# ❌ Wrong: No prefix matching
+deployment name: "claude-3"
+request model: "claude-3-opus"  # → NO match (uses fallback)
+
+# To support multiple variants, create separate deployments:
+deployments:
+  - name: "claude-3-opus"
+    providers: ["anthropic"]
+  - name: "claude-3-sonnet"
+    providers: ["anthropic"]
+```
 
 ---
 

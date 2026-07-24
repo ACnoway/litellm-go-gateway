@@ -1,13 +1,5 @@
 package biz
 
-// ModelInfo 表示一个可用的模型及其路由信息
-type ModelInfo struct {
-	ID        string   `json:"id"`        // 模型唯一标识
-	Name      string   `json:"name"`      // 模型名称
-	Providers []string `json:"providers"` // 按优先级排序的 provider 列表
-	Pattern   string   `json:"pattern"`   // 路由匹配模式（正则表达式）
-}
-
 // ProviderInfo 表示一个 provider 及其状态
 type ProviderInfo struct {
 	Name      string `json:"name"`       // provider 名称
@@ -38,4 +30,15 @@ type RoutingRuleRepo interface {
 	Create(pattern string, providers []string) (*RoutingRuleResponse, error)
 	Update(id int, pattern string, providers []string) (*RoutingRuleResponse, error)
 	Delete(id int) error
+}
+
+// ModelInfo 表示一个可用的逻辑模型（用于 /v1/models 端点）
+type ModelInfo struct {
+	ID          string   `json:"id"`           // 逻辑模型名（用户可见）
+	Object      string   `json:"object"`       // 固定为 "model"
+	Created     int64    `json:"created"`      // 时间戳
+	OwnedBy     string   `json:"owned_by"`     // provider 名称
+	Ready       bool     `json:"ready"`        // 是否就绪（enabled）
+	Description string   `json:"description"`  // 描述
+	Providers   []string `json:"providers"`    // 可用的 providers
 }

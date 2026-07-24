@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/acnoway/litellm-go-gateway/internal/biz"
@@ -11,13 +12,15 @@ import (
 type AdminService struct {
 	providerManager *provider.Manager
 	routingRepo     biz.RoutingRuleRepo
+	deploymentRepo  biz.DeploymentRepo
 }
 
 // NewAdminService 创建管理服务
-func NewAdminService(providerManager *provider.Manager, routingRepo biz.RoutingRuleRepo) *AdminService {
+func NewAdminService(providerManager *provider.Manager, routingRepo biz.RoutingRuleRepo, deploymentRepo biz.DeploymentRepo) *AdminService {
 	return &AdminService{
 		providerManager: providerManager,
 		routingRepo:     routingRepo,
+		deploymentRepo:  deploymentRepo,
 	}
 }
 
@@ -113,5 +116,34 @@ func validatePattern(pattern string) error {
 		return fmt.Errorf("pattern cannot be empty")
 	}
 	return nil
+}
+
+// ListModels 返回所有可用的逻辑模型列表（用于 /v1/models 端点）
+func (s *AdminService) ListModels() ([]biz.ModelInfo, error) {
+	deployments, err := s.deploymentRepo.ListEnabled(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list deployments: %w", err)
+	}
+
+	result := make([]biz.ModelInfo, 0, len(deployments))
+	for _, d := range deployments {
+		// 使用第一个 provider 作为 owned_by
+		ownedBy := "unknown"
+		if len(d.Providers) > 0 {
+			ownedBy = d.Providers[0]
+		}
+
+		result = append(result, biz.ModelInfo{
+			ID:          d.Name,
+			Object:      "model",
+			Created:     d.CreatedAt.Unix(),
+			OwnedBy:     ownedBy,
+			Ready:       d.Enabled,
+			Description: d.Description,
+			Providers:   d.Providers,
+		})
+	}
+
+	return result, nil
 }
 

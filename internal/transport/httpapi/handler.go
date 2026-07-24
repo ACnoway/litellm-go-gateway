@@ -14,12 +14,18 @@ import (
 // Handler 是 OpenAI-compatible HTTP 协议层。它负责 JSON/SSE 和 HTTP 状态码，
 // 但不包含 provider 选择、请求转换或上游网络调用等业务职责。
 type Handler struct {
-	chatService *service.ChatService
+	chatService   *service.ChatService
+	adminService  *service.AdminService
+	deploymentService *service.DeploymentService
 }
 
 // NewHandler 通过依赖注入接收聊天用例，令 Handler 可在测试中替换 service。
-func NewHandler(chatService *service.ChatService) *Handler {
-	return &Handler{chatService: chatService}
+func NewHandler(chatService *service.ChatService, adminService *service.AdminService, deploymentService *service.DeploymentService) *Handler {
+	return &Handler{
+		chatService:       chatService,
+		adminService:      adminService,
+		deploymentService: deploymentService,
+	}
 }
 
 // Register 注册当前 Gateway 支持的公开路由。管理 API 与其他 OpenAI endpoint
@@ -38,12 +44,17 @@ func (h *Handler) health(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
-// models 返回最小 OpenAI Models List 格式。当前为静态示例；接入 deployment
-// 配置后，此处应由 ModelService 按调用方权限返回可用逻辑模型。
+// models 返回所有可用的逻辑模型列表（从 deployment 读取）。
 func (h *Handler) models(c *gin.Context) {
+	models, err := h.adminService.ListModels()
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "api_error", "failed_to_list_models", err.Error())
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
-		"data":   []gin.H{{"id": "gpt-4o", "object": "model", "owned_by": "openai"}},
+		"data":   models,
 	})
 }
 

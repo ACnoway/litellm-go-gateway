@@ -123,6 +123,10 @@ func TestDeploymentRouter_Route(t *testing.T) {
 				Name:      "claude-3",
 				Providers: []string{"anthropic"},
 			},
+			"claude-3-opus": {
+				Name:      "claude-3-opus",
+				Providers: []string{"anthropic"},
+			},
 		},
 	}
 
@@ -133,6 +137,7 @@ func TestDeploymentRouter_Route(t *testing.T) {
 		expectedProviders []string
 	}{
 		{"gpt-4", []string{"openai"}},
+		{"claude-3", []string{"anthropic"}},
 		{"claude-3-opus", []string{"anthropic"}},
 		{"unknown-model", []string{"openai"}}, // fallback
 	}
@@ -174,6 +179,10 @@ func TestDeploymentRouter_GetPrimaryProvider(t *testing.T) {
 				Name:      "claude-3",
 				Providers: []string{"anthropic"},
 			},
+			"claude-3-opus": {
+				Name:      "claude-3-opus",
+				Providers: []string{"anthropic"},
+			},
 		},
 	}
 
@@ -184,6 +193,7 @@ func TestDeploymentRouter_GetPrimaryProvider(t *testing.T) {
 		expectedProvider string
 	}{
 		{"gpt-4", "openai"},
+		{"claude-3", "anthropic"},
 		{"claude-3-opus", "anthropic"},
 		{"unknown-model", "openai"}, // fallback
 	}
@@ -224,6 +234,10 @@ func TestDeploymentRouter_GetFallbackProviders(t *testing.T) {
 				Name:      "claude-3",
 				Providers: []string{"anthropic"},
 			},
+			"claude-3-opus": {
+				Name:      "claude-3-opus",
+				Providers: []string{"anthropic"},
+			},
 		},
 	}
 
@@ -235,6 +249,7 @@ func TestDeploymentRouter_GetFallbackProviders(t *testing.T) {
 		expectedFallbackNames []string
 	}{
 		{"gpt-4", 2, []string{"azure", "anthropic"}},
+		{"claude-3", 0, nil},
 		{"claude-3-opus", 0, nil},
 		{"unknown-model", 0, nil}, // fallback 只有一个 provider
 	}

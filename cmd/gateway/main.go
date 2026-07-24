@@ -60,10 +60,10 @@ func main() {
 	}
 
 	chatService := service.NewChatService(providerManager, settings.Retry, usageRepo)
-	adminService := service.NewAdminService(providerManager, routingRepo)
+	adminService := service.NewAdminService(providerManager, routingRepo, deploymentRepo)
 	deploymentService := service.NewDeploymentService(deploymentRepo)
 
-	handler := httpapi.NewHandler(chatService)
+	handler := httpapi.NewHandler(chatService, adminService, deploymentService)
 	adminHandler := httpapi.NewAdminHandler(adminService, deploymentService)
 	router := httpapi.NewRouter(handler, adminHandler, settings.GatewayAPIKey)
 
